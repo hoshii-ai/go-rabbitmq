@@ -114,6 +114,19 @@ func (consumer *Consumer) Run(handler Handler) error {
 	return nil
 }
 
+// Run starts consuming with automatic reconnection handling. Do not reuse the
+// consumer for anything other than to close it.
+func (consumer *Consumer) Declare() error {
+	err := consumer.declare(
+		consumer.options,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Close cleans up resources and closes the consumer.
 // It waits for handler to finish before returning by default
 // (use WithConsumerOptionsForceShutdown option to disable this behavior).
@@ -218,6 +231,33 @@ func (consumer *Consumer) startGoroutines(
 		go handlerGoroutine(consumer, msgs, options, handler)
 	}
 	consumer.options.Logger.Infof("Processing messages on %v goroutines", options.Concurrency)
+	return nil
+}
+
+// declare declares the queue if it doesn't exist,
+// binds the queue to the routing key(s).
+func (consumer *Consumer) declare(
+	options ConsumerOptions,
+) error {
+	consumer.isClosedMu.Lock()
+	defer consumer.isClosedMu.Unlock()
+
+	var err error
+	for _, exchangeOption := range options.ExchangeOptions {
+		err = declareExchange(consumer.chanManager, exchangeOption)
+		if err != nil {
+			return fmt.Errorf("declare exchange failed: %w", err)
+		}
+	}
+	err = declareQueue(consumer.chanManager, options.QueueOptions)
+	if err != nil {
+		return fmt.Errorf("declare queue failed: %w", err)
+	}
+	err = declareBindings(consumer.chanManager, options)
+	if err != nil {
+		return fmt.Errorf("declare bindings failed: %w", err)
+	}
+
 	return nil
 }
 
